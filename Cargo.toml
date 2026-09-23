@@ -1,0 +1,25 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Krshivam25/carry"
+
+# Declare versions once here; crates opt in with `foo.workspace = true`.
+# Add new deps only in the phase that needs them.
+[workspace.dependencies]
+anyhow = "1.0"
+rust_decimal = "1.43"
+thiserror = "2.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
