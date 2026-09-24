@@ -17,4 +17,7 @@ pub enum CarryError {
 
     #[error("arithmetic overflow")]
     Overflow,
+
+    #[error("unknown venue {0:?}")]
+    UnknownVenue(String),
 }
