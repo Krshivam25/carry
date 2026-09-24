@@ -1,3 +1,4 @@
+use crate::Tick;
 use rust_decimal::Decimal;
 use thiserror::Error;
 
@@ -23,4 +24,13 @@ pub enum CarryError {
 
     #[error("invalid funding parameter {name}: {value}")]
     InvalidFundingParam { name: &'static str, value: Decimal },
+
+    #[error("sequence gap: expected {expected}, got {got}")]
+    SequenceGap { expected: u64, got: u64 },
+
+    #[error("book is not synced: waiting for snapshot")]
+    NotSynced,
+
+    #[error("crossed book: best bid {bid:?} >= best ask {ask:?}")]
+    CrossedBook { bid: Tick, ask: Tick },
 }

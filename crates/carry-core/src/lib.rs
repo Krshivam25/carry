@@ -1,5 +1,6 @@
 //! Core domain types, order book, funding models and slippage walk. No async, no I/O.
 
+mod book;
 mod error;
 mod funding;
 mod price;
@@ -8,6 +9,7 @@ mod side;
 mod tick;
 mod venue;
 
+pub use book::{Level, LevelUpdate, OrderBook};
 pub use error::CarryError;
 pub use funding::{LighterFundingParams, lighter_hourly_funding};
 pub use price::Price;
