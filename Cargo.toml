@@ -15,11 +15,16 @@ repository = "https://github.com/Krshivam25/carry"
 anyhow = "1.0"
 carry-core = { path = "crates/carry-core" }
 criterion = "0.8"
+futures-util = { version = "0.3", features = ["sink"] }
 proptest = "1.11"
+rand = "0.9"
 rust_decimal = "1.43"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 thiserror = "2.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "signal"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

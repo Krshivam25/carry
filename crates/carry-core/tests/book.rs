@@ -182,3 +182,12 @@ fn delta_from_backwards_range_is_rejected() -> Result<(), CarryError> {
     assert!(!book.is_synced());
     Ok(())
 }
+
+#[test]
+fn mark_stale_requires_new_snapshot() -> Result<(), CarryError> {
+    let mut book = synced_book()?;
+    book.mark_stale();
+    assert!(!book.is_synced());
+    assert_eq!(book.apply_delta(11, &[]), Err(CarryError::NotSynced));
+    Ok(())
+}

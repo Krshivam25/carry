@@ -58,6 +58,10 @@ impl OrderBook {
         self.seq.is_some()
     }
 
+    pub fn mark_stale(&mut self) {
+        self.seq = None;
+    }
+
     pub fn apply_snapshot(
         &mut self,
         seq: u64,

@@ -12,6 +12,11 @@ rust_decimal = { workspace = true, features = ["serde-with-str"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+futures-util.workspace = true
+rand.workspace = true
+rustls.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
 
 [lints]
 workspace = true

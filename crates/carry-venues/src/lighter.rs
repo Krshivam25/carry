@@ -2,7 +2,7 @@ use carry_core::{Level, LevelUpdate, Price, Qty, Side, Tick};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use crate::VenueError;
+use crate::{BookEvent, VenueError};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
@@ -65,5 +65,25 @@ impl LighterBook {
                 })
             })
             .collect()
+    }
+}
+
+/// Turns one text frame into a book event, or `None` for non-book messages.
+pub fn to_event(text: &str, tick_size: Decimal) -> Result<Option<BookEvent>, VenueError> {
+    match serde_json::from_str(text)? {
+        LighterMessage::Snapshot(msg) => {
+            let (bids, asks) = msg.order_book.to_levels(tick_size)?;
+            Ok(Some(BookEvent::Snapshot {
+                seq: msg.order_book.nonce,
+                bids,
+                asks,
+            }))
+        }
+        LighterMessage::Update(msg) => Ok(Some(BookEvent::Delta {
+            prev_seq: msg.order_book.begin_nonce,
+            seq: msg.order_book.nonce,
+            updates: msg.order_book.to_updates(tick_size)?,
+        })),
+        LighterMessage::Pong | LighterMessage::Other => Ok(None),
     }
 }

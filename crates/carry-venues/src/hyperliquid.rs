@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-use crate::VenueError;
+use crate::{BookEvent, VenueError};
 
 #[derive(Debug)]
 pub enum HlMessage {
@@ -66,4 +66,19 @@ fn convert(levels: &[HlLevel], tick_size: Decimal) -> Result<Vec<Level>, VenueEr
             })
         })
         .collect()
+}
+
+/// Turns one text frame into a book event, or `None` for non-book messages.
+pub fn to_event(text: &str, tick_size: Decimal) -> Result<Option<BookEvent>, VenueError> {
+    match HlMessage::parse(text)? {
+        HlMessage::L2Book(book) => {
+            let (bids, asks) = book.to_levels(tick_size)?;
+            Ok(Some(BookEvent::Snapshot {
+                seq: book.time,
+                bids,
+                asks,
+            }))
+        }
+        HlMessage::SubscriptionResponse | HlMessage::Pong | HlMessage::Other(_) => Ok(None),
+    }
 }
