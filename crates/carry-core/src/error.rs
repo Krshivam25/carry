@@ -3,10 +3,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CarryError {
-
     #[error("invalid price {0}: must be > 0")]
     InvalidPrice(Decimal),
-
 
     #[error("invalid quantity {0}: must be >= 0")]
     InvalidQty(Decimal),
@@ -15,10 +13,7 @@ pub enum CarryError {
     InvalidTickSize(Decimal),
 
     #[error("price {price} is not a multiple of tick size {tick_size}")]
-    OffTick {
-        price: Decimal,
-        tick_size: Decimal,
-    },
+    OffTick { price: Decimal, tick_size: Decimal },
 
     #[error("arithmetic overflow")]
     Overflow,
