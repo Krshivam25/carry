@@ -83,6 +83,34 @@ impl OrderBook {
             self.seq = None;
             return Err(CarryError::SequenceGap { expected, got: seq });
         }
+        self.apply_levels(seq, updates)
+    }
+
+    pub fn apply_delta_from(
+        &mut self,
+        prev_seq: u64,
+        seq: u64,
+        updates: &[LevelUpdate],
+    ) -> Result<(), CarryError> {
+        let last = self.seq.ok_or(CarryError::NotSynced)?;
+        if prev_seq != last {
+            self.seq = None;
+            return Err(CarryError::SequenceGap {
+                expected: last,
+                got: prev_seq,
+            });
+        }
+        if seq < prev_seq {
+            self.seq = None;
+            return Err(CarryError::SequenceGap {
+                expected: prev_seq,
+                got: seq,
+            });
+        }
+        self.apply_levels(seq, updates)
+    }
+
+    fn apply_levels(&mut self, seq: u64, updates: &[LevelUpdate]) -> Result<(), CarryError> {
         for update in updates {
             let levels = match update.side {
                 Side::Bid => &mut self.bids,

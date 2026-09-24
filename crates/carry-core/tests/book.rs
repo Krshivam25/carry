@@ -145,3 +145,40 @@ fn snapshot_after_gap_resyncs() -> Result<(), CarryError> {
     assert_eq!(book.best_bid(), Some(level(90, 1)?));
     Ok(())
 }
+
+#[test]
+fn delta_from_advances_to_range_end() -> Result<(), CarryError> {
+    let mut book = synced_book()?; // seq 10
+    book.apply_delta_from(10, 17, &[update(Side::Bid, 100, 2)?])?;
+    assert_eq!(book.seq(), Some(17));
+    assert_eq!(book.best_bid(), Some(level(100, 2)?));
+    Ok(())
+}
+
+#[test]
+fn delta_from_with_wrong_begin_is_a_gap() -> Result<(), CarryError> {
+    let mut book = synced_book()?;
+    assert_eq!(
+        book.apply_delta_from(12, 15, &[]),
+        Err(CarryError::SequenceGap {
+            expected: 10,
+            got: 12
+        })
+    );
+    assert!(!book.is_synced());
+    Ok(())
+}
+
+#[test]
+fn delta_from_backwards_range_is_rejected() -> Result<(), CarryError> {
+    let mut book = synced_book()?;
+    assert_eq!(
+        book.apply_delta_from(10, 9, &[]),
+        Err(CarryError::SequenceGap {
+            expected: 10,
+            got: 9
+        })
+    );
+    assert!(!book.is_synced());
+    Ok(())
+}

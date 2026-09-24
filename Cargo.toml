@@ -13,9 +13,12 @@ repository = "https://github.com/Krshivam25/carry"
 # Add new deps only in the phase that needs them.
 [workspace.dependencies]
 anyhow = "1.0"
+carry-core = { path = "crates/carry-core" }
 criterion = "0.8"
 proptest = "1.11"
 rust_decimal = "1.43"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
 thiserror = "2.0"
 
 [workspace.lints.rust]

@@ -118,6 +118,13 @@ version = "0.1.0"
 [[package]]
 name = "carry-venues"
 version = "0.1.0"
+dependencies = [
+ "carry-core",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "carryd"
