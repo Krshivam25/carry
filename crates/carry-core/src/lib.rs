@@ -9,7 +9,7 @@ mod side;
 mod tick;
 mod venue;
 
-pub use book::{Level, LevelUpdate, OrderBook};
+pub use book::{Fill, Level, LevelUpdate, OrderBook};
 pub use error::CarryError;
 pub use funding::{LighterFundingParams, lighter_hourly_funding};
 pub use price::Price;

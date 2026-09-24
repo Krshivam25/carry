@@ -33,4 +33,13 @@ pub enum CarryError {
 
     #[error("crossed book: best bid {bid:?} >= best ask {ask:?}")]
     CrossedBook { bid: Tick, ask: Tick },
+
+    #[error("invalid notional {0}: must be > 0")]
+    InvalidNotional(Decimal),
+
+    #[error("insufficient liquidity: requested {requested}, available {available}")]
+    InsufficientLiquidity {
+        requested: Decimal,
+        available: Decimal,
+    },
 }
