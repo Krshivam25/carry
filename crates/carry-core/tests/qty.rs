@@ -20,4 +20,3 @@ fn new_rejects_negative() {
     let raw = Decimal::new(-1, 0);
     assert_eq!(Qty::new(raw), Err(CarryError::InvalidQty(raw)));
 }
-
