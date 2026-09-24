@@ -184,7 +184,8 @@ fn walk_levels<'a>(
     let worse_by = match side {
         Side::Ask => avg_price - best,
         Side::Bid => best - avg_price,
-    };
+    }
+    .max(Decimal::ZERO);
     let slippage_bps = worse_by
         .checked_mul(Decimal::from(10_000))
         .and_then(|x| x.checked_div(best))

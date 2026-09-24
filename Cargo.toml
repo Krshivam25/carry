@@ -13,6 +13,7 @@ repository = "https://github.com/Krshivam25/carry"
 # Add new deps only in the phase that needs them.
 [workspace.dependencies]
 anyhow = "1.0"
+proptest = "1.11"
 rust_decimal = "1.43"
 thiserror = "2.0"
 
