@@ -20,4 +20,7 @@ pub enum CarryError {
 
     #[error("unknown venue {0:?}")]
     UnknownVenue(String),
+
+    #[error("invalid funding parameter {name}: {value}")]
+    InvalidFundingParam { name: &'static str, value: Decimal },
 }
