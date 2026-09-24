@@ -2,6 +2,10 @@
 
 mod error;
 mod price;
+mod qty;
+mod tick;
 
 pub use error::CarryError;
 pub use price::Price;
+pub use qty::Qty;
+pub use tick::Tick;
