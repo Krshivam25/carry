@@ -15,6 +15,12 @@ pub enum VenueError {
 
     #[error("connection closed by venue")]
     Closed,
+
+    #[error("event channel full: consumer too slow")]
+    Overflow,
+
+    #[error("resync requested")]
+    ResyncRequested,
 }
 
 impl From<tungstenite::Error> for VenueError {

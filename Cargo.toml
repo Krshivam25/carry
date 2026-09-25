@@ -14,6 +14,7 @@ repository = "https://github.com/Krshivam25/carry"
 [workspace.dependencies]
 anyhow = "1.0"
 carry-core = { path = "crates/carry-core" }
+carry-venues = { path = "crates/carry-venues" }
 criterion = "0.8"
 futures-util = { version = "0.3", features = ["sink"] }
 proptest = "1.11"

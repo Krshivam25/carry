@@ -2,8 +2,10 @@ use carry_core::Venue;
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde_json::json;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::{Notify, mpsc};
 use tokio::time::{MissedTickBehavior, interval, sleep};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -59,10 +61,10 @@ impl FeedConfig {
     }
 }
 
-pub async fn run_feed(cfg: FeedConfig, tx: mpsc::Sender<VenueEvent>) {
+pub async fn run_feed(cfg: FeedConfig, tx: mpsc::Sender<VenueEvent>, resync: Arc<Notify>) {
     let mut attempt = 0u32;
     loop {
-        match session(&cfg, &tx, &mut attempt).await {
+        match session(&cfg, &tx, &resync, &mut attempt).await {
             Ok(()) => return,
             Err(err) => eprintln!("[{}] feed error: {err}", cfg.venue),
         }
@@ -83,6 +85,7 @@ pub async fn run_feed(cfg: FeedConfig, tx: mpsc::Sender<VenueEvent>) {
 async fn session(
     cfg: &FeedConfig,
     tx: &mpsc::Sender<VenueEvent>,
+    resync: &Notify,
     attempt: &mut u32,
 ) -> Result<(), VenueError> {
     let (ws, _response) = connect_async(cfg.url.as_str()).await?;
@@ -103,10 +106,12 @@ async fn session(
                      match frame? {
                         Message::Text(text) => {
                             if let Some(event) = cfg.to_event(&text)? {
-                                *attempt = 0; // healthy again
+                                *attempt = 0;
                                 let msg = VenueEvent { venue: cfg.venue, event };
-                                if tx.send(msg).await.is_err() {
-                                    return Ok(());
+                                match tx.try_send(msg) {
+                                    Ok(()) => {}
+                                    Err(TrySendError::Full(_)) => return Err(VenueError::Overflow),
+                                    Err(TrySendError::Closed(_)) => return Ok(()),
                                 }
                             }
                         }
@@ -117,6 +122,8 @@ async fn session(
             _ = ping.tick() => {
                     write.send(Message::text(cfg.ping.as_str())).await?;
             }
+
+            () = resync.notified() => return Err(VenueError::ResyncRequested),
         }
     }
 }

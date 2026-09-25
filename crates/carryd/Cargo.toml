@@ -7,6 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+carry-core.workspace = true
+carry-venues.workspace = true
+rust_decimal.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

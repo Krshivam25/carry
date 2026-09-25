@@ -2,16 +2,23 @@ use carry_core::{CarryError, Level, OrderBook, Venue};
 use carry_venues::{BookEvent, FeedConfig, run_feed};
 use rust_decimal::Decimal;
 use std::error::Error;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tokio::time::interval;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let tick = Decimal::new(1, 1);
     let (tx, mut rx) = mpsc::channel(1024);
-    tokio::spawn(run_feed(FeedConfig::hyperliquid("BTC", tick), tx.clone()));
-    tokio::spawn(run_feed(FeedConfig::lighter(1, tick), tx));
+    // This example never requests a resync; carryd does.
+    let never = Arc::new(Notify::new());
+    tokio::spawn(run_feed(
+        FeedConfig::hyperliquid("BTC", tick),
+        tx.clone(),
+        Arc::clone(&never),
+    ));
+    tokio::spawn(run_feed(FeedConfig::lighter(1, tick), tx, never));
 
     let mut hl = OrderBook::new(tick)?;
     let mut lighter = OrderBook::new(tick)?;
