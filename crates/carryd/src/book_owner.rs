@@ -1,45 +1,89 @@
-use std::sync::Arc;
-
-use carry_core::{CarryError, OrderBook};
+use carry_core::{CarryError, OrderBook, Venue};
 use carry_venues::{BookEvent, VenueEvent};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Notify, mpsc, watch};
+use tokio::time::interval;
+use tracing::{info, instrument, warn};
 
 const BATCH: usize = 256;
+const STATS_EVERY: Duration = Duration::from_secs(60);
 
+#[derive(Debug, Default)]
+struct Stats {
+    events: u64,
+    snapshots: u64,
+    resyncs: u64,
+    disconnects: u64,
+}
+
+#[instrument(name = "book", skip_all, fields(%venue))]
 pub async fn run_book_owner(
+    venue: Venue,
     mut book: OrderBook,
     mut rx: mpsc::Receiver<VenueEvent>,
     publish: watch::Sender<Arc<OrderBook>>,
     resync: Arc<Notify>,
 ) {
+    let mut stats = Stats::default();
+    let mut report = interval(STATS_EVERY);
+    report.tick().await;
     let mut batch = Vec::with_capacity(BATCH);
-    while rx.recv_many(&mut batch, BATCH).await > 0 {
-        for msg in batch.drain(..) {
-            apply(&mut book, msg, &resync);
+
+    loop {
+        tokio::select! {
+            // `recv_many` waits for at least one event, then takes whatever else is queued.
+            received = rx.recv_many(&mut batch, BATCH) => {
+                if received == 0 {
+                    info!(?stats, "feed closed; book owner stopping");
+                    return;
+                }
+                for msg in batch.drain(..) {
+                    apply(&mut book, msg.event, &resync, &mut stats);
+                }
+                publish.send_replace(Arc::new(book.clone()));
+            }
+            _ = report.tick() => {
+                info!(
+                    synced = book.is_synced(),
+                    seq = ?book.seq(),
+                    events = stats.events,
+                    snapshots = stats.snapshots,
+                    resyncs = stats.resyncs,
+                    disconnects = stats.disconnects,
+                    "book stats"
+                );
+            }
         }
-        publish.send_replace(Arc::new(book.clone()));
     }
 }
 
-fn apply(book: &mut OrderBook, msg: VenueEvent, resync: &Notify) {
-    let result = match msg.event {
-        BookEvent::Snapshot { seq, bids, asks } => book.apply_snapshot(seq, &bids, &asks),
+fn apply(book: &mut OrderBook, event: BookEvent, resync: &Notify, stats: &mut Stats) {
+    stats.events += 1;
+
+    let result = match event {
+        BookEvent::Snapshot { seq, bids, asks } => {
+            stats.snapshots += 1;
+            book.apply_snapshot(seq, &bids, &asks)
+        }
         BookEvent::Delta {
             prev_seq,
             seq,
             updates,
         } => book.apply_delta_from(prev_seq, seq, &updates),
         BookEvent::Disconnected => {
+            stats.disconnects += 1;
             book.mark_stale();
             Ok(())
         }
     };
-
     match result {
         Ok(()) => {}
+        // Already stale and waiting for the snapshot we asked for.
         Err(CarryError::NotSynced) => {}
         Err(err) => {
-            eprintln!("[{}] {err}; requesting resync", msg.venue);
+            stats.resyncs += 1;
+            warn!(%err, "book invalid; requesting resync");
             resync.notify_one();
         }
     }
@@ -47,19 +91,19 @@ fn apply(book: &mut OrderBook, msg: VenueEvent, resync: &Notify) {
 
 #[cfg(test)]
 mod tests {
-    use carry_core::{Level, Qty, Tick, Venue};
+    use carry_core::{Level, Qty, Tick};
     use rust_decimal::Decimal;
-    use std::time::Duration;
+    use tokio::task::JoinHandle;
     use tokio::time::timeout;
 
     use super::*;
 
     const WAIT: Duration = Duration::from_secs(1);
-
     struct Harness {
         tx: mpsc::Sender<VenueEvent>,
         view: watch::Receiver<Arc<OrderBook>>,
         resync: Arc<Notify>,
+        task: JoinHandle<()>,
     }
 
     fn start() -> Harness {
@@ -67,8 +111,19 @@ mod tests {
         let (tx, rx) = mpsc::channel(16);
         let (publish, view) = watch::channel(Arc::new(book.clone()));
         let resync = Arc::new(Notify::new());
-        tokio::spawn(run_book_owner(book, rx, publish, Arc::clone(&resync)));
-        Harness { tx, view, resync }
+        let task = tokio::spawn(run_book_owner(
+            Venue::Lighter,
+            book,
+            rx,
+            publish,
+            Arc::clone(&resync),
+        ));
+        Harness {
+            tx,
+            view,
+            resync,
+            task,
+        }
     }
 
     fn level(tick: u64) -> Level {
@@ -92,7 +147,6 @@ mod tests {
             asks: vec![level(101)],
         })
     }
-
     #[tokio::test]
     async fn snapshot_is_published() {
         let mut h = start();
@@ -128,10 +182,17 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        // The feed is already reconnecting; asking again would reconnect twice.
         assert!(
             timeout(Duration::from_millis(50), h.resync.notified())
                 .await
                 .is_err()
         );
+    }
+    #[tokio::test]
+    async fn owner_stops_when_feed_closes() {
+        let h = start();
+        drop(h.tx); // the feed task ending drops its sender
+        timeout(WAIT, h.task).await.unwrap().unwrap();
     }
 }

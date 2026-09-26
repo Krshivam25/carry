@@ -6,19 +6,22 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Notify, mpsc};
 use tokio::time::interval;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let tick = Decimal::new(1, 1);
     let (tx, mut rx) = mpsc::channel(1024);
-    // This example never requests a resync; carryd does.
+    // This example never requests a resync or shutdown; carryd does both.
     let never = Arc::new(Notify::new());
+    let running = CancellationToken::new();
     tokio::spawn(run_feed(
         FeedConfig::hyperliquid("BTC", tick),
         tx.clone(),
         Arc::clone(&never),
+        running.clone(),
     ));
-    tokio::spawn(run_feed(FeedConfig::lighter(1, tick), tx, never));
+    tokio::spawn(run_feed(FeedConfig::lighter(1, tick), tx, never, running));
 
     let mut hl = OrderBook::new(tick)?;
     let mut lighter = OrderBook::new(tick)?;

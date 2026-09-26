@@ -1,14 +1,17 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use carry_core::Venue;
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde_json::json;
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Notify, mpsc};
 use tokio::time::{MissedTickBehavior, interval, sleep};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_util::sync::CancellationToken;
+use tracing::{info, instrument, warn};
 
 use crate::backoff::backoff_delay;
 use crate::{BookEvent, VenueError, VenueEvent, hyperliquid, lighter};
@@ -61,13 +64,31 @@ impl FeedConfig {
     }
 }
 
-pub async fn run_feed(cfg: FeedConfig, tx: mpsc::Sender<VenueEvent>, resync: Arc<Notify>) {
+#[instrument(name = "feed", skip_all, fields(venue = %cfg.venue))]
+pub async fn run_feed(
+    cfg: FeedConfig,
+    tx: mpsc::Sender<VenueEvent>,
+    resync: Arc<Notify>,
+    shutdown: CancellationToken,
+) {
     let mut attempt = 0u32;
+    let mut reconnects = 0u64;
     loop {
-        match session(&cfg, &tx, &resync, &mut attempt).await {
-            Ok(()) => return,
-            Err(err) => eprintln!("[{}] feed error: {err}", cfg.venue),
+        let result = tokio::select! {
+            result = session(&cfg, &tx, &resync, &mut attempt) => result,
+            () = shutdown.cancelled() => {
+                info!("shutdown requested; feed stopping");
+                return;
+            }
+        };
+        match result {
+            Ok(()) => {
+                info!("receiver dropped; feed stopping");
+                return;
+            }
+            Err(err) => warn!(%err, "feed error"),
         }
+
         let disconnected = VenueEvent {
             venue: cfg.venue,
             event: BookEvent::Disconnected,
@@ -75,10 +96,15 @@ pub async fn run_feed(cfg: FeedConfig, tx: mpsc::Sender<VenueEvent>, resync: Arc
         if tx.send(disconnected).await.is_err() {
             return;
         }
+
         let delay = backoff_delay(attempt, rand::random());
         attempt = attempt.saturating_add(1);
-        eprintln!("[{}] reconnecting in {delay:?}", cfg.venue);
-        sleep(delay).await;
+        reconnects += 1;
+        info!(reconnects, ?delay, "reconnecting");
+        tokio::select! {
+            () = sleep(delay) => {}
+            () = shutdown.cancelled() => return,
+        }
     }
 }
 
@@ -91,38 +117,37 @@ async fn session(
     let (ws, _response) = connect_async(cfg.url.as_str()).await?;
     let (mut write, mut read) = ws.split();
     write.send(Message::text(cfg.subscribe.as_str())).await?;
+    info!("subscribed");
 
     let mut ping = interval(PING_EVERY);
-
     ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
     ping.tick().await;
 
     loop {
         tokio::select! {
-                frame = read.next() => {
-                    let Some(frame) = frame else {
-                        return Err(VenueError::Closed);
-                    };
-                     match frame? {
-                        Message::Text(text) => {
-                            if let Some(event) = cfg.to_event(&text)? {
-                                *attempt = 0;
-                                let msg = VenueEvent { venue: cfg.venue, event };
-                                match tx.try_send(msg) {
-                                    Ok(()) => {}
-                                    Err(TrySendError::Full(_)) => return Err(VenueError::Overflow),
-                                    Err(TrySendError::Closed(_)) => return Ok(()),
-                                }
+            frame = read.next() => {
+                let Some(frame) = frame else {
+                    return Err(VenueError::Closed);
+                };
+                match frame? {
+                    Message::Text(text) => {
+                        if let Some(event) = cfg.to_event(&text)? {
+                            *attempt = 0;
+                            let msg = VenueEvent { venue: cfg.venue, event };
+                            match tx.try_send(msg) {
+                                Ok(()) => {}
+                                Err(TrySendError::Full(_)) => return Err(VenueError::Overflow),
+                                Err(TrySendError::Closed(_)) => return Ok(()),
                             }
                         }
-                        Message::Close(_) => return Err(VenueError::Closed),
-                        _ => {}
+                    }
+                    Message::Close(_) => return Err(VenueError::Closed),
+                    _ => {}
                 }
             }
             _ = ping.tick() => {
-                    write.send(Message::text(cfg.ping.as_str())).await?;
+                write.send(Message::text(cfg.ping.as_str())).await?;
             }
-
             () = resync.notified() => return Err(VenueError::ResyncRequested),
         }
     }

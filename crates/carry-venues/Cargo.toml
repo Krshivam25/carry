@@ -17,6 +17,8 @@ rand.workspace = true
 rustls.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true
