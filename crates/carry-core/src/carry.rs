@@ -42,7 +42,6 @@ pub fn executable_carry(
         .checked_mul(Decimal::TWO)
         .ok_or(CarryError::Overflow)?;
 
-    // Shorts receive `short.funding`, longs pay `long.funding`.
     let spread = short
         .funding
         .value()

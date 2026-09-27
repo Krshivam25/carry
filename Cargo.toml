@@ -18,6 +18,7 @@ criterion = "0.8"
 futures-util = { version = "0.3", features = ["sink"] }
 proptest = "1.11"
 rand = "0.9"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rust_decimal = "1.43"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }

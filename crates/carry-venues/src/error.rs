@@ -21,6 +21,15 @@ pub enum VenueError {
 
     #[error("resync requested")]
     ResyncRequested,
+
+    #[error("http: {0}")]
+    Http(#[from] reqwest::Error),
+
+    #[error("market {0} not found in venue response")]
+    MissingMarket(String),
+
+    #[error("not a decimal number: {0}")]
+    BadNumber(String),
 }
 
 impl From<tungstenite::Error> for VenueError {

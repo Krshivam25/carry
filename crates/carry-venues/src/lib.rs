@@ -4,6 +4,7 @@ mod event;
 mod feed;
 pub mod hyperliquid;
 pub mod lighter;
+pub mod rest;
 
 pub use error::VenueError;
 pub use event::{BookEvent, VenueEvent};
