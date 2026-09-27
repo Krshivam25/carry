@@ -42,4 +42,7 @@ pub enum CarryError {
         requested: Decimal,
         available: Decimal,
     },
+
+    #[error("book has no mid: one side is empty")]
+    OneSidedBook,
 }

@@ -9,6 +9,9 @@ pub struct LighterFundingParams {
     big_clamp: Decimal,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HourlyRate(Decimal);
+
 impl LighterFundingParams {
     pub fn new(
         premium_multiplier: Decimal,
@@ -43,6 +46,87 @@ impl LighterFundingParams {
     }
 }
 
+impl HourlyRate {
+    pub fn new(rate: Decimal) -> Self {
+        Self(rate)
+    }
+    pub fn from_8h(rate_8h: Decimal) -> Result<Self, CarryError> {
+        rate_8h
+            .checked_div(Decimal::from(8))
+            .map(Self)
+            .ok_or(CarryError::Overflow)
+    }
+    pub fn value(self) -> Decimal {
+        self.0
+    }
+    pub fn apr(self) -> Result<Decimal, CarryError> {
+        self.0
+            .checked_mul(Decimal::from(8760))
+            .ok_or(CarryError::Overflow)
+    }
+}
+
+pub trait FundingModel {
+    fn hourly_rate(&self, avg_premium: Decimal) -> Result<HourlyRate, CarryError>;
+}
+
+impl FundingModel for LighterFundingParams {
+    fn hourly_rate(&self, avg_premium: Decimal) -> Result<HourlyRate, CarryError> {
+        lighter_hourly_funding(avg_premium, self).map(HourlyRate::new)
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HyperliquidFundingParams {
+    interest_8h: Decimal,
+    clamp: Decimal,
+    hourly_cap: Decimal,
+}
+
+impl HyperliquidFundingParams {
+    pub fn new(
+        interest_8h: Decimal,
+        clamp: Decimal,
+        hourly_cap: Decimal,
+    ) -> Result<Self, CarryError> {
+        for (name, value) in [("clamp", clamp), ("hourly_cap", hourly_cap)] {
+            if value.is_sign_negative() {
+                return Err(CarryError::InvalidFundingParam { name, value });
+            }
+        }
+        Ok(Self {
+            interest_8h,
+            clamp,
+            hourly_cap,
+        })
+    }
+
+    pub fn crypto() -> Self {
+        Self {
+            interest_8h: Decimal::new(1, 4),
+            clamp: Decimal::new(5, 4),
+            hourly_cap: Decimal::new(4, 2),
+        }
+    }
+}
+
+impl FundingModel for HyperliquidFundingParams {
+    fn hourly_rate(&self, avg_premium: Decimal) -> Result<HourlyRate, CarryError> {
+        let interest_adj = self
+            .interest_8h
+            .checked_sub(avg_premium)
+            .ok_or(CarryError::Overflow)?
+            .clamp(-self.clamp, self.clamp);
+
+        let rate_8h = avg_premium
+            .checked_add(interest_adj)
+            .ok_or(CarryError::Overflow)?;
+
+        let hourly = HourlyRate::from_8h(rate_8h)?.value();
+        Ok(HourlyRate::new(
+            hourly.clamp(-self.hourly_cap, self.hourly_cap),
+        ))
+    }
+}
 pub fn lighter_hourly_funding(
     avg_premium: Decimal,
     params: &LighterFundingParams,

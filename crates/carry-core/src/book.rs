@@ -114,6 +114,16 @@ impl OrderBook {
         self.apply_levels(seq, updates)
     }
 
+    pub fn mid(&self) -> Result<Option<Decimal>, CarryError> {
+        let (Some(bid), Some(ask)) = (self.best_bid(), self.best_ask()) else {
+            return Ok(None);
+        };
+        let bid = bid.tick.to_price(self.tick_size)?.value();
+        let ask = ask.tick.to_price(self.tick_size)?.value();
+        let sum = bid.checked_add(ask).ok_or(CarryError::Overflow)?;
+        Ok(Some(sum / Decimal::TWO))
+    }
+
     fn apply_levels(&mut self, seq: u64, updates: &[LevelUpdate]) -> Result<(), CarryError> {
         for update in updates {
             let levels = match update.side {
