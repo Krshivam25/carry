@@ -1,113 +1,85 @@
 mod book_owner;
-
-use std::sync::Arc;
-use std::time::Duration;
+mod markets;
+mod pipeline;
+mod run;
+mod scan;
 
 use anyhow::Result;
-use carry_core::{OrderBook, Side};
-use carry_venues::{FeedConfig, run_feed};
-use rust_decimal::Decimal;
-use tokio::sync::{Notify, mpsc, watch};
-use tokio::task::JoinSet;
-use tokio::time::{interval, timeout};
-use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use crate::book_owner::run_book_owner;
+use crate::scan::ScanArgs;
 
-const CHANNEL_CAPACITY: usize = 256;
-const REPORT_EVERY: Duration = Duration::from_secs(10);
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+#[derive(Debug, Parser)]
+#[command(version, about)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    Run,
+    Scan(ScanArgs),
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Log level from RUST_LOG (e.g. RUST_LOG=debug), default "info".
+    let cli = Cli::parse();
+    let default_level = match cli.command {
+        Command::Run => "info",
+        Command::Scan(_) => "warn",
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level)),
         )
         .init();
 
-    let shutdown = CancellationToken::new();
-    let mut tasks = JoinSet::new();
-    let tick = Decimal::new(1, 1); // BTC on both venues
-    let hl = spawn_venue(&mut tasks, FeedConfig::hyperliquid("BTC", tick), &shutdown)?;
-    let lighter = spawn_venue(&mut tasks, FeedConfig::lighter(1, tick), &shutdown)?;
-    info!("carryd started");
-
-    let notional = Decimal::new(50_000, 0);
-    let mut report = interval(REPORT_EVERY);
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
-
-    loop {
-        tokio::select! {
-            _ = report.tick() => {
-                // Take the Arc and release the watch borrow at once: never hold it.
-                let hl_book = Arc::clone(&hl.borrow());
-                let lighter_book = Arc::clone(&lighter.borrow());
-                log_executable("hyperliquid", &hl_book, notional);
-                log_executable("lighter", &lighter_book, notional);
-            }
-            _ = &mut ctrl_c => break,
-        }
+    match cli.command {
+        Command::Run => run::run().await,
+        Command::Scan(args) => scan::scan(args).await,
     }
-
-    // Graceful shutdown: cancel feeds -> they drop their senders -> owners see the
-    // channel close and exit. Wait for all of them, but not forever.
-    info!("shutting down");
-    shutdown.cancel();
-    let drained = timeout(SHUTDOWN_GRACE, async {
-        while let Some(joined) = tasks.join_next().await {
-            if let Err(err) = joined {
-                warn!(%err, "task failed");
-            }
-        }
-    })
-    .await;
-    if drained.is_err() {
-        warn!("tasks did not stop in time; aborting");
-        tasks.abort_all();
-    }
-    info!("stopped cleanly");
-    Ok(())
 }
 
-/// Starts a feed task and a book-owner task; returns the book's watch receiver.
-fn spawn_venue(
-    tasks: &mut JoinSet<()>,
-    cfg: FeedConfig,
-    shutdown: &CancellationToken,
-) -> Result<watch::Receiver<Arc<OrderBook>>> {
-    let venue = cfg.venue;
-    let book = OrderBook::new(cfg.tick_size)?;
-    let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
-    let (publish, view) = watch::channel(Arc::new(book.clone()));
-    let resync = Arc::new(Notify::new());
-    tasks.spawn(run_feed(cfg, tx, Arc::clone(&resync), shutdown.clone()));
-    tasks.spawn(run_book_owner(venue, book, rx, publish, resync));
-    Ok(view)
-}
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+    use rust_decimal::Decimal;
 
-fn log_executable(venue: &str, book: &OrderBook, notional: Decimal) {
-    if !book.is_synced() {
-        warn!(venue, "book stale");
-        return;
+    use super::*;
+    use crate::markets::Coin;
+
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
     }
-    match (
-        book.walk(Side::Ask, notional),
-        book.walk(Side::Bid, notional),
-    ) {
-        (Ok(buy), Ok(sell)) => info!(
-            venue,
-            %notional,
-            buy_avg = %buy.avg_price.round_dp(1),
-            buy_bps = %buy.slippage_bps.round_dp(2),
-            sell_avg = %sell.avg_price.round_dp(1),
-            sell_bps = %sell.slippage_bps.round_dp(2),
-            "executable"
-        ),
-        (Err(err), _) | (_, Err(err)) => warn!(venue, %err, "walk failed"),
+
+    #[test]
+    fn scan_parses_arguments() {
+        let cli = Cli::try_parse_from(["carryd", "scan", "--coin", "eth", "--notional", "1000.5"])
+            .unwrap();
+        let Command::Scan(args) = cli.command else {
+            panic!("expected scan");
+        };
+        assert_eq!(args.coin, Coin::Eth);
+        assert_eq!(args.notional, Decimal::new(10_005, 1));
+        assert_eq!(args.hours, Decimal::new(168, 0));
+    }
+
+    #[test]
+    fn scan_defaults() {
+        let cli = Cli::try_parse_from(["carryd", "scan"]).unwrap();
+        let Command::Scan(args) = cli.command else {
+            panic!("expected scan");
+        };
+        assert_eq!(args.coin, Coin::Btc);
+        assert_eq!(args.notional, Decimal::new(50_000, 0));
+    }
+
+    #[test]
+    fn bad_notional_is_rejected() {
+        assert!(Cli::try_parse_from(["carryd", "scan", "--notional", "abc"]).is_err());
+        assert!(Cli::try_parse_from(["carryd", "scan", "--coin", "doge"]).is_err());
     }
 }
